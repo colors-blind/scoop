@@ -1,5 +1,4 @@
 use clap::Parser;
-use etherparse::*;
 use pcap::{Capture, Device, Error, Linktype, PacketCodec, PacketHeader, Stat};
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -56,6 +55,16 @@ const ICMP_CODE_REDIRECT: &[&str] = &["net", "host", "TOS net", "TOS host"];
 const ICMP_CODE_EXCEED: &[&str] = &["in transit", "reassembly"];
 const ICMP_CODE_PARAMETER: &[&str] = &["options absent"];
 
+const ETH_TYPE_IPV4: u16 = 0x0800;
+const ETH_TYPE_ARP: u16 = 0x0806;
+
+const IP_PROTO_TCP: u8 = 6;
+const IP_PROTO_UDP: u8 = 17;
+const IP_PROTO_ICMP: u8 = 1;
+
+const ARP_OP_REQUEST: u16 = 1;
+const ARP_OP_REPLY: u16 = 2;
+
 #[derive(Parser, Debug)]
 #[command(name = "scoop")]
 #[command(about = "A lightweight packet sniffing tool", long_about = None)]
@@ -79,26 +88,18 @@ struct Args {
 struct PacketProcessor {
     streaming_hex: bool,
     print_hex: bool,
-    payload_offset: usize,
 }
 
 impl PacketCodec for PacketProcessor {
     type Item = ();
 
-    fn decode(&mut self, packet: PacketHeader, data: &[u8]) -> Self::Item {
+    fn decode(&mut self, _packet: PacketHeader, data: &[u8]) -> Self::Item {
         if self.streaming_hex {
             print_streaming_hex(data);
             return;
         }
 
-        match SlicedPacket::from_ethernet(data) {
-            Ok(sliced) => {
-                process_sliced_packet(&sliced, self.print_hex);
-            }
-            Err(_) => {
-                println!("unsupported protocol");
-            }
-        }
+        process_packet(data);
 
         if self.print_hex && data.len() > 14 {
             print_hex_dump(&data[14..]);
@@ -159,7 +160,6 @@ fn main() {
     let processor = PacketProcessor {
         streaming_hex: args.streaming_hex,
         print_hex: args.print_hex,
-        payload_offset: 14,
     };
 
     let mut codec_iter = cap.iter(processor).expect("Failed to create packet iterator");
@@ -198,152 +198,171 @@ fn init_capture(device: &str, snaplen: i32, filter: &str) -> Result<Capture<pcap
     Ok(cap)
 }
 
-fn process_sliced_packet(sliced: &SlicedPacket, print_hex: bool) {
-    let mut found = false;
-
-    for slice in &sliced.slice {
-        match slice {
-            LinkSlice::Ethernet2(_) => {}
-            LinkSlice::Arp(arp) => {
-                decode_arp(arp);
-                found = true;
-                break;
-            }
-            NetSlice::Ipv4(ip) => {
-                decode_ipv4(ip, sliced);
-                found = true;
-                break;
-            }
-            _ => {}
-        }
+fn process_packet(data: &[u8]) {
+    if data.len() < 14 {
+        println!("unsupported protocol");
+        return;
     }
 
-    if !found {
-        println!("unsupported protocol");
+    let eth_type = u16::from_be_bytes([data[12], data[13]]);
+
+    match eth_type {
+        ETH_TYPE_IPV4 => decode_ipv4(data),
+        ETH_TYPE_ARP => decode_arp(data),
+        _ => {
+            println!("unsupported protocol");
+        }
     }
 }
 
-fn decode_arp(arp: &ArpSlice) {
+fn decode_arp(data: &[u8]) {
+    if data.len() < 42 {
+        println!("-");
+        return;
+    }
+
     print!("ARP: ");
 
-    match arp.operation {
-        ArpOperation::Request => {
-            let spa = arp.sender_protocol_addr;
-            let tpa = arp.target_protocol_addr;
+    let arp_op = u16::from_be_bytes([data[20], data[21]]);
+
+    match arp_op {
+        ARP_OP_REQUEST => {
             println!(
                 "y0 who's got {}.{}.{}.{} tell {}.{}.{}.{}",
-                tpa[0], tpa[1], tpa[2], tpa[3], spa[0], spa[1], spa[2], spa[3]
+                data[38], data[39], data[40], data[41],
+                data[28], data[29], data[30], data[31]
             );
         }
-        ArpOperation::Reply => {
-            let spa = arp.sender_protocol_addr;
-            let sha = arp.sender_hardware_addr;
+        ARP_OP_REPLY => {
             println!(
                 "y0 {}.{}.{}.{} is at {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                spa[0], spa[1], spa[2], spa[3], sha[0], sha[1], sha[2], sha[3], sha[4], sha[5]
+                data[28], data[29], data[30], data[31],
+                data[22], data[23], data[24], data[25], data[26], data[27]
             );
         }
         _ => println!("-"),
     }
 }
 
-fn decode_ipv4(ip: &Ipv4Slice, sliced: &SlicedPacket) {
-    let src = ip.source_addr();
-    let dst = ip.destination_addr();
+fn decode_ipv4(data: &[u8]) {
+    if data.len() < 34 {
+        println!("unsupported protocol");
+        return;
+    }
+
+    let ip_start = 14;
+    let ip_hl = (data[ip_start] & 0x0f) << 2;
+    let ip_total_len = u16::from_be_bytes([data[ip_start + 2], data[ip_start + 3]]);
+    let ip_id = u16::from_be_bytes([data[ip_start + 4], data[ip_start + 5]]);
+    let ip_proto = data[ip_start + 9];
 
     print!(
         "IP: {}.{}.{}.{} -> {}.{}.{}.{} ({}), id: {} ",
-        src[0], src[1], src[2], src[3], dst[0], dst[1], dst[2], dst[3],
-        ip.payload_len() + 20, ip.identification
+        data[ip_start + 12], data[ip_start + 13], data[ip_start + 14], data[ip_start + 15],
+        data[ip_start + 16], data[ip_start + 17], data[ip_start + 18], data[ip_start + 19],
+        ip_total_len, ip_id
     );
 
-    for slice in &sliced.slice {
-        match slice {
-            TransportSlice::Tcp(tcp) => {
-                decode_tcp(tcp);
-                return;
-            }
-            TransportSlice::Udp(udp) => {
-                decode_udp(udp);
-                return;
-            }
-            NetSlice::Icmpv4(icmp) => {
-                decode_icmp(icmp);
-                return;
-            }
-            _ => {}
-        }
-    }
+    let trans_start = ip_start + ip_hl as usize;
 
-    println!("unsupported protocol");
+    match ip_proto {
+        IP_PROTO_TCP => decode_tcp(data, trans_start),
+        IP_PROTO_UDP => decode_udp(data, trans_start),
+        IP_PROTO_ICMP => decode_icmp(data, trans_start),
+        _ => println!("unsupported protocol"),
+    }
 }
 
-fn decode_tcp(tcp: &TcpSlice) {
-    print!("TCP: {} -> {} ", tcp.source_port(), tcp.destination_port());
+fn decode_tcp(data: &[u8], offset: usize) {
+    if data.len() < offset + 14 {
+        println!("");
+        return;
+    }
 
-    let mut flags = String::new();
-    if tcp.fin() {
-        flags.push('F');
+    let src_port = u16::from_be_bytes([data[offset], data[offset + 1]]);
+    let dst_port = u16::from_be_bytes([data[offset + 2], data[offset + 3]]);
+
+    print!("TCP: {} -> {} ", src_port, dst_port);
+
+    let flags = data[offset + 13];
+    let mut flags_str = String::new();
+
+    if flags & 0x01 != 0 {
+        flags_str.push('F');
     }
-    if tcp.syn() {
-        flags.push('S');
+    if flags & 0x02 != 0 {
+        flags_str.push('S');
     }
-    if tcp.rst() {
-        flags.push('R');
+    if flags & 0x04 != 0 {
+        flags_str.push('R');
     }
-    if tcp.psh() {
-        flags.push('P');
+    if flags & 0x08 != 0 {
+        flags_str.push('P');
     }
-    if tcp.ack() {
-        flags.push('A');
+    if flags & 0x10 != 0 {
+        flags_str.push('A');
     }
-    if tcp.urg() {
-        flags.push('U');
+    if flags & 0x20 != 0 {
+        flags_str.push('U');
     }
-    println!("{}", flags);
+
+    println!("{}", flags_str);
 }
 
-fn decode_udp(udp: &UdpSlice) {
-    println!("UDP: {} -> {}", udp.source_port(), udp.destination_port());
+fn decode_udp(data: &[u8], offset: usize) {
+    if data.len() < offset + 4 {
+        println!("");
+        return;
+    }
+
+    let src_port = u16::from_be_bytes([data[offset], data[offset + 1]]);
+    let dst_port = u16::from_be_bytes([data[offset + 2], data[offset + 3]]);
+
+    println!("UDP: {} -> {}", src_port, dst_port);
 }
 
-fn decode_icmp(icmp: &Icmpv4Slice) {
+fn decode_icmp(data: &[u8], offset: usize) {
+    if data.len() < offset + 2 {
+        println!("");
+        return;
+    }
+
     print!("ICMP: ");
 
-    let type_val = icmp.icmp_type().0;
-    let code_val = icmp.code_u8();
+    let type_val = data[offset] as usize;
+    let code_val = data[offset + 1] as usize;
 
-    if (type_val as usize) < ICMP_TYPE.len() {
-        print!("{} ", ICMP_TYPE[type_val as usize]);
+    if type_val < ICMP_TYPE.len() {
+        print!("{} ", ICMP_TYPE[type_val]);
     } else {
         print!("unknown type ({}) ", type_val);
     }
 
     match type_val {
         3 => {
-            if (code_val as usize) < ICMP_CODE_UNREACH.len() {
-                println!("{}", ICMP_CODE_UNREACH[code_val as usize]);
+            if code_val < ICMP_CODE_UNREACH.len() {
+                println!("{}", ICMP_CODE_UNREACH[code_val]);
             } else {
                 println!("code {}", code_val);
             }
         }
         5 => {
-            if (code_val as usize) < ICMP_CODE_REDIRECT.len() {
-                println!("{}", ICMP_CODE_REDIRECT[code_val as usize]);
+            if code_val < ICMP_CODE_REDIRECT.len() {
+                println!("{}", ICMP_CODE_REDIRECT[code_val]);
             } else {
                 println!("code {}", code_val);
             }
         }
         11 => {
-            if (code_val as usize) < ICMP_CODE_EXCEED.len() {
-                println!("{}", ICMP_CODE_EXCEED[code_val as usize]);
+            if code_val < ICMP_CODE_EXCEED.len() {
+                println!("{}", ICMP_CODE_EXCEED[code_val]);
             } else {
                 println!("code {}", code_val);
             }
         }
         12 => {
-            if (code_val as usize) < ICMP_CODE_PARAMETER.len() {
-                println!("{}", ICMP_CODE_PARAMETER[code_val as usize]);
+            if code_val < ICMP_CODE_PARAMETER.len() {
+                println!("{}", ICMP_CODE_PARAMETER[code_val]);
             } else {
                 println!("code {}", code_val);
             }
