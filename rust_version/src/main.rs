@@ -1,5 +1,5 @@
 use clap::Parser;
-use pcap::{Capture, Device, Error, Linktype, PacketCodec, PacketHeader, Stat};
+use pcap::{Capture, Device, Error, Linktype, Packet, Stat};
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -90,10 +90,8 @@ struct PacketProcessor {
     print_hex: bool,
 }
 
-impl PacketCodec for PacketProcessor {
-    type Item = ();
-
-    fn decode(&mut self, _packet: PacketHeader, data: &[u8]) -> Self::Item {
+impl PacketProcessor {
+    fn process(&mut self, data: &[u8]) {
         if self.streaming_hex {
             print_streaming_hex(data);
             return;
@@ -121,15 +119,24 @@ fn main() {
     })
     .expect("Error setting Ctrl-C handler");
 
+    let devices = match Device::list() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("scoop_init() failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
     let device_name = match args.device {
         Some(d) => d,
-        None => match find_default_device() {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("scoop_init() failed: {}", e);
+        None => {
+            if devices.is_empty() {
+                eprintln!("scoop_init() failed: no devices found");
                 std::process::exit(1);
             }
-        },
+            println!("Using device: {}", devices[0].name);
+            devices[0].name.clone()
+        }
     };
 
     let filter = if !args.filter.is_empty() {
@@ -157,32 +164,26 @@ fn main() {
 
     println!("<ctrl-c> to quit");
 
-    let processor = PacketProcessor {
+    let mut processor = PacketProcessor {
         streaming_hex: args.streaming_hex,
         print_hex: args.print_hex,
     };
 
-    let mut codec_iter = cap.iter(processor).expect("Failed to create packet iterator");
-
     while running.load(Ordering::SeqCst) {
-        if let Some(_) = codec_iter.next() {
+        match cap.next_packet() {
+            Ok(packet) => {
+                processor.process(&packet);
+            }
+            Err(_) => {
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
-        std::thread::sleep(Duration::from_millis(1));
     }
 
     match cap.stats() {
         Ok(stats) => print_statistics(&stats),
         Err(e) => eprintln!("pcap_stats() failed: {}", e),
     }
-}
-
-fn find_default_device() -> Result<String, Error> {
-    let devices = Device::list()?;
-    if devices.is_empty() {
-        return Err(Error::InvalidInput);
-    }
-    println!("Using device: {}", devices[0].name);
-    Ok(devices[0].name.clone())
 }
 
 fn init_capture(device: &str, snaplen: i32, filter: &str) -> Result<Capture<pcap::Active>, Error> {
