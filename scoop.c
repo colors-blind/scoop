@@ -511,6 +511,7 @@ void print_hex(const u_char *packet, u_short len) {
 
 
 void cleanup(int signo) {
+    (void)signo;  /* 避免未使用参数警告 */
     loop = 0;
     printf("Interrupt signal caught...\n");
 }

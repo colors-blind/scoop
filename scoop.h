@@ -30,6 +30,10 @@
  *
  */
 
+/* 启用 BSD 类型定义 (u_char, u_short, u_int 等) */
+#define _DEFAULT_SOURCE 1
+#define _BSD_SOURCE 1
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +44,14 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pcap.h>
+
+/* 确保 BSD 类型在严格 C99 模式下也有定义 */
+#ifndef u_char
+typedef unsigned char   u_char;
+typedef unsigned short  u_short;
+typedef unsigned int    u_int;
+typedef unsigned long   u_long;
+#endif
 
 /* 默认抓包长度：200字节 */
 #define SNAPLEN         200

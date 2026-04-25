@@ -7,7 +7,7 @@
 srcdir		= .
 
 CC		= gcc -g
-CFLAGS		= -O2 -std=c99 -D_POSIX_C_SOURCE=200809L -Wall -Wextra
+CFLAGS		= -O2 -std=c99 -Wall -Wextra
 # LDFLAGS	= -L/path/to/libpcap/library/if/needed
 OBJECTS         = scoop.o
 # INCS		= -I/path/to/libpcap/headers/if/needed
