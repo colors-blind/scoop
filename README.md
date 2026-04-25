@@ -22,7 +22,19 @@
 
 如果你在学网络协议、抓包流程、或者想看 `libpcap` 最小可运行样例，这个项目就很合适。
 
-## 依赖
+## 版本说明
+
+本项目包含三个版本的实现：
+
+- **C版本**: 根目录下的原始代码（已优化到C99标准）
+- **Go版本**: `go_version/` 目录，使用 `gopacket` 库
+- **Rust版本**: `rust_version/` 目录，使用 `pcap` + `etherparse` 库
+
+---
+
+## C版本
+
+### 依赖
 
 需要系统安装：
 
@@ -34,7 +46,7 @@
 
 `sudo apt-get install build-essential libpcap-dev`
 
-## 编译
+### 编译
 
 在项目目录执行：
 
@@ -42,7 +54,7 @@
 
 成功后会生成可执行文件：`scoop`
 
-## 运行
+### 运行
 
 常见用法：
 
@@ -56,7 +68,7 @@
 - 输出十六进制：`sudo ./scoop -x`
 - 自定义过滤器：`sudo ./scoop "tcp and port 80"`
 
-## 参数说明
+### 参数说明
 
 - `-h`：显示帮助
 - `-i device`：指定抓包网卡
@@ -68,9 +80,72 @@
 
 `arp or tcp or udp or icmp`
 
+---
+
+## Go版本
+
+`go_version/` 目录下的Go语言实现。
+
+### 依赖
+
+- Go 1.21+
+- `libpcap` 开发库
+
+### 编译
+
+```bash
+cd go_version
+go mod tidy
+go build -o scoop .
+```
+
+### 运行
+
+与C版本参数相同：
+
+```bash
+sudo ./scoop -h
+sudo ./scoop -i eth0 -x "tcp and port 80"
+```
+
+---
+
+## Rust版本
+
+`rust_version/` 目录下的Rust语言实现。
+
+### 依赖
+
+- Rust 1.70+ (edition 2021)
+- `libpcap` 开发库
+
+### 编译
+
+```bash
+cd rust_version
+cargo build --release
+```
+
+编译后的可执行文件在 `target/release/scoop`
+
+### 运行
+
+```bash
+sudo ./target/release/scoop -h
+sudo ./target/release/scoop -i eth0 -x "tcp and port 80"
+```
+
+### Cargo依赖
+
+- `pcap` - libpcap的Rust绑定
+- `etherparse` - 协议解析库（支持Ethernet, IPv4, TCP, UDP, ICMP）
+- `clap` - 命令行参数解析（derive特性）
+- `ctrlc` - Ctrl+C信号处理
+
+---
+
 ## 注意事项
 
 - 抓包通常需要 root 权限，所以运行时一般要加 `sudo`
 - 当前代码只支持以太网链路层（Ethernet）
 - 这是教学示例，不是生产级抓包分析器
-
