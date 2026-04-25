@@ -30,48 +30,66 @@
  *
  */
 
-#include <unistd.h>
-#include <errno.h>
+/* 启用 BSD 类型定义 (u_char, u_short, u_int 等) */
+#define _DEFAULT_SOURCE 1
+#define _BSD_SOURCE 1
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <pcap.h>
-#include <string.h>
-#include <signal.h>
- 
+
+/* 确保 BSD 类型在严格 C99 模式下也有定义 */
+#ifndef u_char
+typedef unsigned char   u_char;
+typedef unsigned short  u_short;
+typedef unsigned int    u_int;
+typedef unsigned long   u_long;
+#endif
+
+/* 默认抓包长度：200字节 */
 #define SNAPLEN         200
+/* 混杂模式 */
 #define PROMISC         1
+/* 超时时间：500毫秒 */
 #define TIMEOUT         500
+/* 默认过滤器 */
 #define FILTER          "arp or tcp or udp or icmp"
 
-struct scoop_pack
-{
-    pcap_t *p;                      /* pcap descriptor */
-    struct pcap_pkthdr h;           /* pcap packet header */
-    u_char flags;                   /* control flags */
-#define PRINT_HEX       0x01        /* print packet data */
-#define STREAMING_BITS  0x02        /* stream packets */
-    u_char *packet;                 /* the packet! */
+/* 抓包控制结构体 */
+struct scoop_pack {
+    pcap_t *p;                      /* pcap 描述符 */
+    struct pcap_pkthdr h;           /* pcap 数据包头部 */
+    u_char flags;                   /* 控制标志位 */
+#define PRINT_HEX       0x01        /* 以十六进制打印数据包 */
+#define STREAMING_BITS  0x02        /* 流式输出数据包 */
+    u_char *packet;                 /* 数据包内容 */
 };
 
+/* 函数声明 */
 struct scoop_pack *scoop_init(char *, u_char, int, char *, char *);
 void scoop_destroy(struct scoop_pack *);
 void scoop(struct scoop_pack *);
 void demultiplex(struct scoop_pack *);
-void decode_arp(u_char *, u_char);
-void decode_ip(u_char *, u_char);
-void decode_tcp(u_char *, u_char);
-void decode_udp(u_char *, u_char);
-void decode_icmp(u_char *, u_char);
-void decode_unknown(u_char *, u_char);
-void print_hex(u_char *, u_short);
+void decode_arp(const u_char *, u_char);
+void decode_ip(const u_char *, u_char);
+void decode_tcp(const u_char *, u_char);
+void decode_udp(const u_char *, u_char);
+void decode_icmp(const u_char *, u_char);
+void decode_unknown(const u_char *, u_char);
+void print_hex(const u_char *, u_short);
 void cleanup(int);
-int catch_sig(int, void(*)());
-void usage(char *);
+int catch_sig(int, void(*)(int));
+void usage(const char *);
 
-u_char *icmp_type[] =
-{
+/* ICMP 类型字符串表 */
+const char *icmp_type[] = {
     "echo reply",
     "unknown (1)",
     "unknown (2)",
@@ -91,11 +109,11 @@ u_char *icmp_type[] =
     "info reply",
     "mask request",
     "mask reply",
-    0
+    NULL
 };
 
-u_char *icmp_code_unreach[] =
-{
+/* ICMP 不可达代码字符串表 */
+const char *icmp_code_unreach[] = {
     "net",
     "host",
     "protocol",
@@ -112,29 +130,29 @@ u_char *icmp_code_unreach[] =
     "filter prohib",
     "host prec",
     "prec cutoff",
-    0
+    NULL
 };
 
-u_char *icmp_code_redirect[] =
-{
+/* ICMP 重定向代码字符串表 */
+const char *icmp_code_redirect[] = {
     "net",
     "host",
     "TOS net",
     "TOS host",
-    0
+    NULL
 };
 
-u_char *icmp_code_exceed[] =
-{
+/* ICMP 超时代码字符串表 */
+const char *icmp_code_exceed[] = {
     "in transit",
     "reassembly",
-    0
+    NULL
 };
 
-u_char *icmp_code_parameter[] =
-{
+/* ICMP 参数问题代码字符串表 */
+const char *icmp_code_parameter[] = {
     "options absent",
-    0
+    NULL
 };
 
 /* EOF */

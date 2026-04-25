@@ -1,0 +1,11 @@
+[package]
+name = "scoop"
+version = "1.0.0"
+edition = "2021"
+description = "A lightweight packet sniffing tool"
+license = "BSD-3-Clause"
+
+[dependencies]
+pcap = "1.1"
+clap = { version = "4.0", features = ["derive"] }
+ctrlc = "3.4"

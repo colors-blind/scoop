@@ -7,10 +7,10 @@
 srcdir		= .
 
 CC		= gcc -g
-CFLAGS		= -O2 -D_BSD_SOURCE -Wall
-#LDFLAGS	= -L/path/to/libpcap/library/if/needed
+CFLAGS		= -O2 -std=c99 -Wall -Wextra
+# LDFLAGS	= -L/path/to/libpcap/library/if/needed
 OBJECTS         = scoop.o
-#INCS		= -I/path/to/libpcap/headers/if/needed
+# INCS		= -I/path/to/libpcap/headers/if/needed
 LIBS		= -lpcap
 
 .c.o:
